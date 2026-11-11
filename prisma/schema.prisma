@@ -1,0 +1,377 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  SUPER_ADMIN
+  STAFF
+  RESIDENT
+}
+
+enum SpaceStatus {
+  VACANT
+  OCCUPIED
+  MAINTENANCE
+  INACTIVE
+}
+
+enum WorkOrderStatus {
+  OPEN
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AssigneeKind {
+  INTERNAL_STAFF
+  INTERNAL_RESIDENT
+  EXTERNAL_VENDOR
+}
+
+enum ServiceCategory {
+  INFORMATION
+  PERMISSION
+  MAINTENANCE
+}
+
+enum ServiceRequestStatus {
+  ACCEPTED
+  ASSIGNED
+  CLOSED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum CaseStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_INFO
+  RESOLVED
+  CLOSED
+}
+
+enum AnnouncementType {
+  GENERAL
+  AUDITED
+  NOTE_TO_RESIDENT
+}
+
+enum RevenueStatus {
+  FORECAST
+  HOLD
+  BILLED
+}
+
+enum ChecklistBranch {
+  SITE_MANAGEMENT
+  FACILITIES
+  SECURITY
+  CASE_MANAGEMENT
+  RESIDENT_PORTAL
+  ADMIN
+}
+
+enum ResponsibleRole {
+  STAFF
+  RESIDENT
+  CASE_MANAGER
+}
+
+// ---------- Core models ----------
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  role         Role
+  name         String
+  createdAt    DateTime      @default(now())
+  resident     Resident?
+  announcements Announcement[] @relation("AnnouncementAuthor")
+  messages     Message[]     @relation("MessageSender")
+  bulletins    Bulletin[]    @relation("BulletinCreator")
+}
+
+model Site {
+  id                 String              @id @default(uuid())
+  name               String
+  address            String
+  city               String
+  state              String
+  zip                String
+  createdAt          DateTime            @default(now())
+  residents          Resident[]
+  spaces             Space[]
+  workOrders         WorkOrder[]
+  serviceRequests    ServiceRequest[]
+  incidents          Incident[]
+  announcements      Announcement[]
+  revenueEvents      RevenueEvent[]
+  checklistTemplates ChecklistTemplate[]
+}
+
+model Resident {
+  id              String           @id @default(uuid())
+  firstName       String
+  lastName        String
+  email           String           @unique
+  phone           String?
+  unit            String?
+  siteId          String
+  site            Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  userId          String?          @unique
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  serviceRequests ServiceRequest[]
+  cases           Case[]
+  messages        Message[]
+  revenueEvents   RevenueEvent[]
+  payments        Payment[]
+
+  @@index([siteId])
+}
+
+/// User-maintained list of space types. Space.spaceType and RevenueEvent.spaceType
+/// store the type's name, so renames are cascaded in the Space Types admin actions.
+model SpaceType {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model Space {
+  id          String      @id @default(uuid())
+  siteId      String
+  site        Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  spaceType   String
+  description String
+  status      SpaceStatus @default(VACANT)
+  createdAt   DateTime    @default(now())
+  workOrders  WorkOrder[]
+  maintenanceEvents MaintenanceEvent[]
+
+  @@index([siteId])
+}
+
+model WorkOrder {
+  id              String          @id @default(uuid())
+  title           String
+  description     String
+  status          WorkOrderStatus @default(OPEN)
+  priority        Priority        @default(MEDIUM)
+  siteId          String
+  site            Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  spaceId         String?
+  space           Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  assignedTo      String?
+  assigneeKind    AssigneeKind?
+  actualCost      Decimal?        @db.Decimal(10, 2)
+  costApprovedAt  DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  serviceRequests ServiceRequest[]
+  maintenanceEvents MaintenanceEvent[]
+
+  @@index([siteId])
+}
+
+model MaintenanceEvent {
+  id          String     @id @default(uuid())
+  workOrderId String
+  workOrder   WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  spaceId     String?
+  space       Space?     @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  description String
+  cost        Decimal?   @db.Decimal(10, 2)
+  createdAt   DateTime   @default(now())
+}
+
+model ServiceRequest {
+  id          String               @id @default(uuid())
+  number      String               @unique
+  residentId  String
+  resident    Resident             @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  siteId      String
+  site        Site                 @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  category    ServiceCategory
+  type        String
+  description String
+  status      ServiceRequestStatus @default(ACCEPTED)
+  workOrderId String?
+  workOrder   WorkOrder?           @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([residentId])
+}
+
+model Incident {
+  id          String           @id @default(uuid())
+  title       String
+  description String
+  severity    IncidentSeverity @default(LOW)
+  siteId      String
+  site        Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  reportedBy  String
+  status      IncidentStatus   @default(OPEN)
+  createdAt   DateTime         @default(now())
+
+  @@index([siteId])
+}
+
+model Case {
+  id          String     @id @default(uuid())
+  title       String
+  description String
+  status      CaseStatus @default(OPEN)
+  category    String
+  residentId  String?
+  resident    Resident?  @relation(fields: [residentId], references: [id], onDelete: SetNull)
+  assignedTo  String?
+  resolution  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([residentId])
+}
+
+model Announcement {
+  id        String           @id @default(uuid())
+  title     String
+  content   String
+  type      AnnouncementType @default(GENERAL)
+  siteId    String
+  site      Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User             @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  createdAt DateTime         @default(now())
+
+  @@index([siteId])
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  residentId  String
+  resident    Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User     @relation("MessageSender", fields: [senderId], references: [id])
+  body        String
+  createdAt   DateTime @default(now())
+
+  @@index([residentId])
+}
+
+// ---------- Bulletin board ----------
+
+/// Ephemeral bulletin. Shown between msgStart and msgEnd unless rejected.
+model Bulletin {
+  id              String    @id @default(uuid())
+  msgTo           String?   @db.VarChar(50)
+  msgFrom         String?   @db.VarChar(50)
+  msg             String    @db.VarChar(500)
+  msgStart        DateTime
+  msgEnd          DateTime
+  dateTimeCreated DateTime  @default(now())
+  creatorId       String?
+  creator         User?     @relation("BulletinCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  approved        Boolean   @default(false)
+  rejected        Boolean?
+  reviewer        String?   @db.VarChar(50)
+  dateReviewed    DateTime?
+
+  @@index([msgStart, msgEnd])
+}
+
+// ---------- Billing ----------
+
+model RevenueEvent {
+  id             String        @id @default(uuid())
+  siteId         String
+  site           Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  residentId     String?
+  resident       Resident?     @relation(fields: [residentId], references: [id], onDelete: SetNull)
+  spaceType      String?
+  description    String
+  amount         Decimal       @db.Decimal(10, 2)
+  status         RevenueStatus @default(FORECAST)
+  dateProposed   DateTime
+  dateBillCreate DateTime?
+  dateDue        DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([siteId, status])
+  @@index([residentId])
+}
+
+model Payment {
+  id          String   @id @default(uuid())
+  residentId  String
+  resident    Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(10, 2)
+  method      String
+  reference   String   @unique
+  createdAt   DateTime @default(now())
+
+  @@index([residentId])
+}
+
+// ---------- Checklists ----------
+
+model ChecklistTemplate {
+  id          String           @id @default(uuid())
+  name        String
+  description String?
+  branch      ChecklistBranch
+  siteId      String?
+  site        Site?            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  targetRole  ResponsibleRole  @default(STAFF)
+  isActive    Boolean          @default(true)
+  version     Int              @default(1)
+  createdAt   DateTime         @default(now())
+  items       ChecklistItem[]
+
+  @@index([branch])
+}
+
+model ChecklistItem {
+  id              String           @id @default(uuid())
+  templateId      String
+  template        ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  orderIndex      Int
+  description     String
+  isRequired      Boolean          @default(true)
+  requiresDocument Boolean         @default(false)
+  responsibleRole ResponsibleRole  @default(STAFF)
+
+  @@index([templateId, orderIndex])
+}
